@@ -80,13 +80,23 @@ void write_save_state(struct emu8051_data *emu_data, FILE *save_file)
 
 void save_state_to_file(struct emu8051_data *emu_data, char *file_name)
 {
+	const char *dir_name = "/save-states/";
 	FILE *save_file;
 	char *pwd, *buf;
-	const char *dir_name = "/save-states/";
+	uint32_t i;
 
 	pwd = getenv("PWD");
 	if (pwd == NULL)
 		return;
+
+	/* Remove trailing spaces. */
+	for (i = strlen(file_name) - 1; i != 0; i--) {
+		if (file_name[i] == ' ') {
+			file_name[i] = '\0';
+			continue;
+		} else
+			break;
+	}
 
 	buf = calloc(1, strlen(pwd) + strlen(file_name) + strlen(dir_name) + 1);
 	if (buf == NULL)
