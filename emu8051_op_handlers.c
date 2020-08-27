@@ -1057,15 +1057,13 @@ void subb_handler(struct emu8051_dev *emu_dev)
 		break;
 	}
 
+	if (get_psw_flag(emu_dev, CARRY_FLAG))
+ 		src++;
+
 	if (acc < src) {
 		acc += 0x100;
-		if (get_psw_flag(emu_dev, CARRY_FLAG))
-			acc--;
-
 		set_psw_flag(emu_dev, CARRY_FLAG);
 	} else {
-		if (get_psw_flag(emu_dev, CARRY_FLAG))
-			acc--;
 		clr_psw_flag(emu_dev, CARRY_FLAG);
 	}
 
