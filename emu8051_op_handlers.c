@@ -1217,16 +1217,11 @@ uint8_t handle_opcode(struct emu8051_data *emu_data)
 
 	emu_dev->op_ch->changes = 0;
 	emu_dev->op_ch->pc = emu_dev->pc;
-/*
-	if (emu_dev->pc == 0x7cb2)
-		ret = 1;
-	else
-		ret = 0;
-//	if (op_info->op_id == MOV_ID) {
-//		if (dst_id ==
-*/
+
 	op_info = get_op_info(get_pmem(emu_dev, emu_dev->pc));
 
+	if (emu_data->log_data.logging_set)
+		logging_check_opcode(emu_data, op_info);
 
 	if (op_info->handler)
 		op_info->handler(emu_dev);

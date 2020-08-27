@@ -243,6 +243,44 @@ static void state_save_win_input(struct emu8051_data *emu_data)
 	hide_popup(popup_win->panel);
 }
 
+static void logging_setup_win_input(struct emu8051_data *emu_data)
+{
+	struct popup_win_data *popup_win = &emu_data->popup_data[LOG_ENABLE_PANEL];
+	struct field_data *field_ptr;
+        int end_loop;
+
+	/* If we're already logging, stop before opening a new one. */
+	if (emu_data->log_data.logging_set)
+		logging_close_log(emu_data);
+
+	/* This is where our non-creation stuff starts. */
+	show_popup(popup_win->panel);
+	post_form(popup_win->form);
+
+	set_current_field(popup_win->form, popup_win->field[LOG_ENABLE_IN]);
+	form_driver(popup_win->form, REQ_CLR_FIELD);
+
+	field_ptr = (struct field_data*)field_userptr(current_field(popup_win->form));
+	ok_button_highlight(popup_win->field[LOG_ENABLE_OK_BUTTON], field_ptr->field_id);
+
+	wrefresh(popup_win->win);
+
+	end_loop = field_input_handler(popup_win);
+
+	if (end_loop) {
+		open_log_file(emu_data,
+				field_buffer(popup_win->field[LOG_ENABLE_IN], 0));
+
+		field_ptr = field_userptr(popup_win->field[LOG_ENABLE_VERB_SWITCH]);
+		emu_data->log_data.exit_on_verb = field_ptr->toggle_val;
+		if (emu_data->log_data.exit_on_verb)
+			fputs("Exit on verb handling enabled.\n", emu_data->log_data.log_file);
+	}
+
+	unpost_form(popup_win->form);
+	hide_popup(popup_win->panel);
+}
+
 static void settings_win_input(struct emu8051_data *emu_data)
 {
 	struct popup_win_data *popup_win = &emu_data->popup_data[SETTINGS_PANEL];
@@ -397,6 +435,9 @@ static void disassembly_win_input(struct emu8051_data *emu_data, int in_ch)
 		break;
 	case 's':
 		state_save_win_input(emu_data);
+		break;
+	case 'l':
+		logging_setup_win_input(emu_data);
 		break;
 	case 'v':
 		verb_win_input(emu_data);

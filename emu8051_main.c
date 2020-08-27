@@ -93,11 +93,6 @@ int main(int argc, char **argv)
 {
 	struct emu8051_data *emu_data;
 
-//	if (argc < 4) {
-//		printf("Usage: %s <rom0> <rom1> <rom2> <exram>\n", argv[0]);
-//		return -1;
-//	}
-
 	emu_data = calloc(1, sizeof(struct emu8051_data));
 	emu_data->emu_dev = calloc(1, sizeof(struct emu8051_dev));
 
@@ -119,6 +114,9 @@ int main(int argc, char **argv)
 	emu_main(emu_data);
 
 	endwin();
+
+	if (emu_data->log_data.logging_set)
+		logging_close_log(emu_data);
 
 	return 0;
 }

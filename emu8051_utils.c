@@ -213,7 +213,6 @@ void save_backlog_state_to_file(struct emu8051_data *emu_data, char *file_name)
 }
 */
 
-
 void op_change_write(struct emu8051_dev *emu_dev, uint16_t addr_type, uint8_t addr)
 {
 	struct op_change *op_ch;
@@ -480,3 +479,461 @@ uint8_t breakpoint_check(struct emu8051_data *emu_data)
 
 	return 0;
 }
+
+/* Logging related functions:
+ * Logs write certain functions out to a logfile, current logs that we're
+ * interested in are writes to exram, iram, and the SFR's. Also, log any
+ * function calls, and any time that the HIC bus addr/data is set.
+ */
+
+void open_log_file(struct emu8051_data *emu_data, char *file_name)
+{
+	const char *dir_name = "/log-files/";
+	FILE *log_file;
+	char *pwd, *buf;
+	uint32_t i;
+
+	pwd = getenv("PWD");
+	if (pwd == NULL)
+		return;
+
+	/* Remove trailing spaces. */
+	for (i = strlen(file_name) - 1; i != 0; i--) {
+		if (file_name[i] == ' ') {
+			file_name[i] = '\0';
+			continue;
+		} else
+			break;
+	}
+
+	buf = calloc(1, strlen(pwd) + strlen(file_name) + strlen(dir_name) + 1);
+	if (buf == NULL)
+		return;
+
+	sprintf(buf, "%s%s%s", pwd, dir_name, file_name);
+
+	log_file = fopen(buf, "w+");
+	if (log_file == NULL) {
+		free(buf);
+		return;
+	}
+
+	emu_data->log_data.log_file = log_file;
+	emu_data->log_data.logging_set = 1;
+	emu_data->log_data.number_of_funcs = 0;
+
+	free(buf);
+}
+
+void acall_log_write(struct emu8051_data *emu_data)
+{
+	struct emu8051_dev *emu_dev = emu_data->emu_dev;
+	uint16_t ret_addr, jmp_addr, tmp;
+	char buf[1024];
+
+	/* Push return address onto the stack, low first, high second. */
+	ret_addr = emu_dev->pc + 2;
+
+	/* High-order bits 15-11 come from incremented PC's 15-11 bits */
+	jmp_addr = ret_addr & 0xf8;
+
+	/* Bits 10-8 come from 3 high order bits in the opcode. */
+	tmp = (get_pmem(emu_dev, emu_dev->pc) >> 5) & 0x07;
+	jmp_addr |= (tmp << 8);
+
+	/* Bits 7-0 come from second byte of instruction. */
+	jmp_addr |= get_pmem(emu_dev, emu_dev->pc + 1);
+
+	sprintf(buf, "ACALL: op %d, pc 0x%04x, func addr 0x%04x, ret addr 0x%04x.\n", emu_data->number,
+			emu_dev->pc, jmp_addr, ret_addr);
+
+	fputs(buf, emu_data->log_data.log_file);
+}
+
+void lcall_log_write(struct emu8051_data *emu_data)
+{
+	struct logfile_data *log_data = &emu_data->log_data;
+	struct emu8051_dev *emu_dev = emu_data->emu_dev;
+	char buf[1024];
+	uint8_t pmem_bank;
+	uint16_t addr;
+	uint32_t i;
+
+	pmem_bank = direct_read(emu_dev, 0xfa);
+	addr = get_pmem(emu_dev, emu_dev->pc + 2);
+	addr |= (get_pmem(emu_dev, emu_dev->pc + 1) << 8);
+
+	sprintf(buf, "\nLCALL: op %d, pc 0x%04x, func addr 0x%04x, bank 0x%02x, ret addr 0x%04x.\n", emu_data->number,
+			emu_dev->pc, addr, pmem_bank, emu_dev->pc + 3);
+
+	fputs(buf, emu_data->log_data.log_file);
+
+	if (log_data->number_of_funcs) {
+		for (i = 0; i < log_data->number_of_funcs; i++) {
+			if (log_data->func_addrs[i] == addr
+					&& log_data->pmem_bank[i] == pmem_bank) {
+				log_data->func_call_cnt[i]++;
+				return;
+			}
+		}
+
+		/* Never found this function, so add it as a new one. */
+		log_data->func_addrs = realloc(log_data->func_addrs,
+				sizeof(uint16_t) * log_data->number_of_funcs + 1);
+		log_data->func_call_cnt = realloc(log_data->func_call_cnt,
+				sizeof(uint16_t) * log_data->number_of_funcs + 1);
+		log_data->pmem_bank = realloc(log_data->pmem_bank,
+				sizeof(uint8_t) * log_data->number_of_funcs + 1);
+		log_data->func_addrs[log_data->number_of_funcs] = addr;
+		log_data->pmem_bank[log_data->number_of_funcs] = pmem_bank;
+		log_data->func_call_cnt[log_data->number_of_funcs] = 1;
+		log_data->number_of_funcs++;
+	} else {
+		log_data->func_addrs = calloc(1, sizeof(uint16_t));
+		log_data->func_call_cnt = calloc(1, sizeof(uint16_t));
+		log_data->pmem_bank = calloc(1, sizeof(uint8_t));
+		log_data->func_addrs[0] = addr;
+		log_data->func_call_cnt[0]++;
+		log_data->pmem_bank[0] = pmem_bank;
+		log_data->number_of_funcs++;
+	}
+}
+
+
+uint8_t mov_get_src(struct emu8051_dev *emu_dev, const struct opcode_info *op,
+		char *buf)
+{
+	uint8_t addr, data;
+
+	addr = 0;
+	switch (op->src_id) {
+	case IMMED_ID:
+		if (op->dst_id == DIRECT_ID)
+			data = get_pmem(emu_dev, emu_dev->pc + 2);
+		else
+			data = get_pmem(emu_dev, emu_dev->pc + 1);
+		sprintf(buf, "immediate val 0x%02x", data);
+		break;
+	case DIRECT_ID:
+		addr = get_pmem(emu_dev, emu_dev->pc + 1);
+		data = direct_read(emu_dev, addr);
+		sprintf(buf, "direct read addr 0x%02x, data 0x%02x", addr, data);
+		break;
+	case I_R0_ID:
+		addr = get_reg(emu_dev, 0) & 0xff;
+		data = emu_dev->iram[addr];
+		sprintf(buf, "indirect read (r0) addr 0x%02x, data 0x%02x", addr, data);
+		break;
+	case I_R1_ID:
+		addr = get_reg(emu_dev, 1) & 0xff;
+		data = emu_dev->iram[addr];
+		sprintf(buf, "indirect read (r1) addr 0x%02x, data 0x%02x", addr, data);
+		break;
+	case R0_ID ... R7_ID:
+		addr = op->src_id - R0_ID;
+		data = get_reg(emu_dev, addr) & 0xff;
+		sprintf(buf, "read r%d, data 0x%02x", addr, data);
+		break;
+	case A_ID:
+		data = emu_dev->sfr[ACC];
+		sprintf(buf, "read acc, data 0x%02x", data);
+		break;
+	default:
+		sprintf(buf, "no src read");
+		data = 0;
+		break;
+	}
+
+	return data;
+}
+
+uint32_t get_current_hic_addr(struct emu8051_dev *emu_dev)
+{
+	uint32_t addr;
+
+	addr = direct_read(emu_dev, 0xb1) & 0xff;
+	addr |= (direct_read(emu_dev, 0xb2) & 0xff) << 8;
+	addr |= (direct_read(emu_dev, 0xb3) & 0xff) << 16;
+
+	return addr;
+}
+
+uint32_t get_current_hic_data(struct emu8051_dev *emu_dev)
+{
+	uint32_t data;
+
+	data = direct_read(emu_dev, 0xb4) & 0xff;
+	data |= (direct_read(emu_dev, 0xb5) & 0xff) << 8;
+	data |= (direct_read(emu_dev, 0xb6) & 0xff) << 16;
+	data |= (direct_read(emu_dev, 0xb7) & 0xff) << 24;
+
+	return data;
+}
+
+void check_hic_register_set(struct emu8051_data *emu_data,
+		uint8_t addr, uint8_t data)
+{
+	struct emu8051_dev *emu_dev = emu_data->emu_dev;
+	struct logfile_data *log_data = &emu_data->log_data;
+	uint8_t i, addr_set, data_set;
+	uint32_t hic_addr, hic_data;
+	char buf[128];
+
+	memset(buf, 0, 128);
+
+	data_set = addr_set = 1;
+	if (addr < 0xb4)
+		log_data->hic_addr_set[addr - 0xb1] = 1;
+	else
+		log_data->hic_data_set[addr - 0xb4] = 1;
+
+	for (i = 0; i < 3; i++) {
+		if (!log_data->hic_addr_set[i]) {
+			addr_set = 0;
+			break;
+		}
+	}
+
+	for (i = 0; i < 4; i++) {
+		if (!log_data->hic_data_set[i]) {
+			data_set = 0;
+			break;
+		}
+	}
+
+	if (addr_set) {
+		hic_addr = get_current_hic_addr(emu_dev) & 0xffff;
+		hic_addr |= (data << 16);
+		sprintf(buf, "HIC Bus address set to 0x%06x.\n", hic_addr);
+		fputs(buf, emu_data->log_data.log_file);
+		memset(log_data->hic_addr_set, 0, 3);
+	}
+
+	if (data_set) {
+		hic_data = get_current_hic_data(emu_dev) & 0xffffff;
+		hic_data |= (data << 24);
+		sprintf(buf, "HIC Bus data set to 0x%08x.\n", hic_data);
+		fputs(buf, emu_data->log_data.log_file);
+		memset(log_data->hic_data_set, 0, 4);
+	}
+}
+
+void mov_log_write(struct emu8051_data *emu_data,
+		const struct opcode_info *op)
+{
+	struct emu8051_dev *emu_dev = emu_data->emu_dev;
+	uint8_t log_write = 1;
+	char buf[1024], tmp[128];
+	uint8_t data, addr, src;
+
+	memset(buf, 0, 1024);
+	memset(tmp, 0, 128);
+
+	switch (op->dst_id) {
+	case DIRECT_ID:
+		src = mov_get_src(emu_dev, op, tmp);
+		if (op->src_id == DIRECT_ID)
+			addr = get_pmem(emu_dev, emu_dev->pc + 2);
+		else
+			addr = get_pmem(emu_dev, emu_dev->pc + 1);
+
+		sprintf(buf, "MOV: op %d, pc 0x%04x, write direct addr 0x%02x, %s.\n", emu_data->number,
+			emu_dev->pc, addr, tmp);
+		break;
+	case I_R0_ID:
+		addr = get_reg(emu_dev, 0) & 0xff;
+		src = mov_get_src(emu_dev, op, tmp);
+		sprintf(buf, "MOV: op %d, pc 0x%04x, write iram (r0) addr 0x%02x, %s.\n", emu_data->number,
+			emu_dev->pc, addr, tmp);
+		break;
+	case I_R1_ID:
+		addr = get_reg(emu_dev, 1) & 0xff;
+		src = mov_get_src(emu_dev, op, tmp);
+		sprintf(buf, "MOV: op %d, pc 0x%04x, write iram (r1) addr 0x%02x, %s.\n", emu_data->number,
+			emu_dev->pc, addr, tmp);
+		break;
+	case A_ID:
+		if (op->src_id == DIRECT_ID)
+			addr = get_pmem(emu_dev, emu_dev->pc + 1);
+		else
+			break;
+		data = direct_read(emu_dev, addr);
+		sprintf(tmp, "direct read addr 0x%02x, data 0x%02x", addr, data);
+		sprintf(buf, "MOV: op %d, pc 0x%04x, write ACC, %s.\n", emu_data->number,
+			emu_dev->pc, tmp);
+		break;
+	default:
+		log_write = 0;
+		break;
+	}
+
+	if (log_write)
+		fputs(buf, emu_data->log_data.log_file);
+
+	/* Check if all the registers on the HIC Bus have been set in
+	 * succession, and print out their value if they have. */
+	if (op->dst_id == DIRECT_ID && (addr >= 0xb1 && addr <= 0xb7))
+		check_hic_register_set(emu_data, addr, src);
+
+}
+
+void movx_log_write(struct emu8051_data *emu_data,
+		const struct opcode_info *op)
+{
+	struct emu8051_dev *emu_dev = emu_data->emu_dev;
+	char buf[1024];
+	uint16_t dptr;
+	uint8_t data;
+
+	/* Read from exram. */
+	if (op->dst_id == A_ID) {
+		switch (op->src_id) {
+		case IDPTR_ID:
+			dptr = get_dptr(emu_dev);
+			break;
+		case I_R0_ID:
+			dptr = get_reg(emu_dev, 0) & 0xff;
+			break;
+		case I_R1_ID:
+			dptr = get_reg(emu_dev, 1) & 0xff;
+			break;
+		default:
+			break;
+		}
+
+		data = emu_dev->xram[dptr];
+
+		sprintf(buf, "MOVX: op %d, pc 0x%04x, read xram addr 0x%04x, value 0x%02x.\n", emu_data->number,
+			emu_dev->pc, dptr, data);
+	} else { /* Write to exram. */
+		switch (op->dst_id) {
+		case IDPTR_ID:
+			dptr = get_dptr(emu_dev);
+			break;
+		case I_R0_ID:
+			dptr = get_reg(emu_dev, 0) & 0xff;
+			break;
+		case I_R1_ID:
+			dptr = get_reg(emu_dev, 1) & 0xff;
+			break;
+		default:
+			break;
+		}
+
+		data = emu_dev->sfr[ACC];
+		sprintf(buf, "MOVX: op %d, pc 0x%04x, write xram addr 0x%04x, value 0x%02x.\n", emu_data->number,
+			emu_dev->pc, dptr, data);
+	}
+
+	fputs(buf, emu_data->log_data.log_file);
+}
+
+void movc_log_write(struct emu8051_data *emu_data,
+		const struct opcode_info *op)
+{
+	struct emu8051_dev *emu_dev = emu_data->emu_dev;
+	uint8_t acc, data;
+	char buf[1024];
+	uint16_t dptr;
+
+	acc = emu_dev->sfr[ACC];
+	if (op->src_id == A_DPTR_ID) {
+		dptr = get_dptr(emu_dev);
+		data = get_pmem(emu_dev, dptr + acc);
+		sprintf(buf, "MOVC: op %d, pc 0x%04x, read pmem (dptr) 0x%04x, value 0x%02x.\n", emu_data->number,
+			emu_dev->pc, dptr + acc, data);
+	} else {
+		dptr = emu_dev->pc + 1;
+		data = get_pmem(emu_dev, dptr + acc);
+		sprintf(buf, "MOVC: op %d, pc 0x%04x, read pmem (pc) 0x%04x, value 0x%02x.\n", emu_data->number,
+			emu_dev->pc, dptr + acc, data);
+	}
+
+	fputs(buf, emu_data->log_data.log_file);
+}
+
+void ret_log_write(struct emu8051_data *emu_data)
+{
+	struct emu8051_dev *emu_dev = emu_data->emu_dev;
+	char buf[1024];
+	uint16_t addr;
+
+	addr = emu_dev->iram[emu_dev->sfr[SP]] << 8;
+	addr |= emu_dev->iram[emu_dev->sfr[SP] - 1] & 0xff;
+
+	sprintf(buf, "RET: op %d, pc 0x%04x, ret addr 0x%04x.\n\n", emu_data->number,
+			emu_dev->pc, addr);
+	fputs(buf, emu_data->log_data.log_file);
+}
+
+void logging_print_func_calls(struct emu8051_data *emu_data)
+{
+	struct logfile_data *log_data = &emu_data->log_data;
+	char buf[1024];
+	uint32_t i;
+
+	memset(buf, 0, 1024);
+	for (i = 0; i < log_data->number_of_funcs; i++) {
+		sprintf(buf, "Func[%d]: addr 0x%04x, bank 0x%02x, call count %d.\n",
+				i, log_data->func_addrs[i], log_data->pmem_bank[i],
+				log_data->func_call_cnt[i]);
+		fputs(buf, log_data->log_file);
+	}
+}
+
+void logging_close_log(struct emu8051_data *emu_data)
+{
+	struct logfile_data *log_data = &emu_data->log_data;
+
+	if (!log_data->logging_set)
+		return;
+
+	logging_print_func_calls(emu_data);
+
+	fclose(log_data->log_file);
+	if (log_data->number_of_funcs) {
+		if (log_data->func_addrs)
+			free(log_data->func_addrs);
+		if (log_data->func_call_cnt)
+			free(log_data->func_call_cnt);
+		if (log_data->pmem_bank)
+			free(log_data->pmem_bank);
+	}
+
+	memset(log_data, 0, sizeof(*log_data));
+}
+
+void logging_check_opcode(struct emu8051_data *emu_data,
+		const struct opcode_info *op)
+{
+	struct emu8051_dev *emu_dev = emu_data->emu_dev;
+
+	switch (op->op_id) {
+	case ACALL_ID:
+		acall_log_write(emu_data);
+		break;
+	case LCALL_ID:
+		lcall_log_write(emu_data);
+		break;
+	case MOV_ID:
+		mov_log_write(emu_data, op);
+		break;
+	case MOVC_ID:
+		movc_log_write(emu_data, op);
+		break;
+	case MOVX_ID:
+		movx_log_write(emu_data, op);
+		break;
+	case RET_ID:
+		ret_log_write(emu_data);
+		break;
+	default:
+		break;
+	}
+
+	if (!emu_dev->iram[0x79] && emu_data->log_data.exit_on_verb) {
+		fputs("End of verb handling.\n", emu_data->log_data.log_file);
+		logging_close_log(emu_data);
+	}
+}
+

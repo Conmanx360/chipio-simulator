@@ -3,6 +3,9 @@
 #include <form.h>
 #include <menu.h>
 
+#define ARRAY_SIZE(array) \
+    (sizeof(array) / sizeof(*array))
+
 /*
  * 8051 emu header file.
  */
@@ -177,7 +180,7 @@ struct emu8051_dev {
 
 
 #define NUM_OF_WINDOWS 3
-#define NUM_OF_POPUPS 5
+#define NUM_OF_POPUPS 6
 
 enum {
 	DISASSEMBLY_WIN,
@@ -335,6 +338,21 @@ struct opcode_info {
 	void (*handler)(struct emu8051_dev *emu_dev);
 };
 
+struct logfile_data {
+	uint8_t logging_set;
+	FILE *log_file;
+
+	uint8_t exit_on_verb;
+
+	uint8_t hic_addr_set[3];
+	uint8_t hic_data_set[4];
+
+	uint16_t *func_addrs;
+	uint16_t *func_call_cnt;
+	uint8_t  *pmem_bank;
+	uint32_t number_of_funcs;
+};
+
 struct emu8051_data {
 	struct emu8051_dev *emu_dev;
 	struct emu_win_data win_data[NUM_OF_WINDOWS];
@@ -350,6 +368,7 @@ struct emu8051_data {
 	uint8_t breakpoint_flags;
 
 	struct breakpoint_data break_data;
+	struct logfile_data log_data;
 };
 
 struct win_dimensions {
@@ -504,9 +523,18 @@ enum settings_field_ids {
 	SETTINGS_OK_BUTTON,
 };
 
+enum logging_setup_field_ids {
+	LOG_ENABLE_NAME_LABEL,
+	LOG_ENABLE_IN,
+	LOG_ENABLE_VERB_SWITCH,
+	LOG_ENABLE_VERB_LABEL,
+	LOG_ENABLE_OK_BUTTON,
+};
+
 enum button_ids {
 	BUTTON_TOGGLE_PC,
 	BUTTON_TOGGLE_DPTR,
+	BUTTON_TOGGLE_VERB_LOG,
 };
 
 enum {
@@ -515,6 +543,7 @@ enum {
 	SAVE_STATE_PANEL,
 	XRAM_DISP_PANEL,
 	SETTINGS_PANEL,
+	LOG_ENABLE_PANEL,
 	END_PANELS,
 };
 #define NUM_OF_PANELS END_PANELS
@@ -625,3 +654,6 @@ void breakpoint_flag_set(struct emu8051_data *emu_data, uint8_t flag_id, uint8_t
 uint8_t breakpoint_check(struct emu8051_data *emu_data);
 void resize_dynarray(struct dynamic_array *dyn_array, uint32_t size);
 void save_backlog_state_to_file(struct emu8051_data *emu_data, char *file_name);
+void open_log_file(struct emu8051_data *emu_data, char *file_name);
+void logging_check_opcode(struct emu8051_data *emu_data, const struct opcode_info *op);
+void logging_close_log(struct emu8051_data *emu_data);
