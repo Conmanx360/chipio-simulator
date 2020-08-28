@@ -83,6 +83,8 @@ void add_handler(struct emu8051_dev *emu_dev)
 
 		emu_dev->pc++;
 		break;
+	default:
+		return;
 	}
 
 	tmp = acc + val;
@@ -122,6 +124,8 @@ void addc_handler(struct emu8051_dev *emu_dev)
 
 		emu_dev->pc++;
 		break;
+	default:
+		return;
 	}
 
 	if (get_psw_flag(emu_dev, CARRY_FLAG)) {
@@ -245,6 +249,8 @@ void cjne_handler(struct emu8051_dev *emu_dev)
 		dst = get_reg(emu_dev, get_pmem(emu_dev, emu_dev->pc) - 0xb8);
 		src = get_pmem(emu_dev, emu_dev->pc + 1);
 		break;
+	default:
+		return;
 	}
 
 	rel_offset = get_pmem(emu_dev, emu_dev->pc + 2);
@@ -423,6 +429,8 @@ void djnz_handler(struct emu8051_dev *emu_dev)
 
 		emu_dev->pc += 2;
 		break;
+	default:
+		return;
 	}
 
 	if (val != 0)
@@ -1054,6 +1062,9 @@ void subb_handler(struct emu8051_dev *emu_dev)
 		src = get_reg(emu_dev, op - 0x98);
 
 		emu_dev->pc++;
+		break;
+	default:
+		src = acc = op = res = 0;
 		break;
 	}
 

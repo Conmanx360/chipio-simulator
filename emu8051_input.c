@@ -95,6 +95,9 @@ static int check_input(uint8_t in_type, int ch)
 	case INPUT_NONE:
 		ret = 0;
 		break;
+	default:
+		ret = 0;
+		break;
 	}
 
 	return ret;
@@ -458,7 +461,7 @@ static void iram_win_input(struct emu8051_data *emu_data, int in_ch)
 {
 	struct emu_win_data *win_data = &emu_data->win_data[IRAM_WIN];
 	struct emu8051_dev *dev = emu_data->emu_dev;
-	int ch, keys;
+	int ch, keys = 0;
 	uint32_t res;
 	uint8_t x_off, y_off;
 

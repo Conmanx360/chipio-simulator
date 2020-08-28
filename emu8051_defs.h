@@ -643,7 +643,8 @@ void setup_verb_handler(struct emu8051_data *emu_data, uint8_t nid,
 
 /* emu8051_utils.c */
 void save_state_to_file(struct emu8051_data *emu_data, char *file_name);
-void restore_state_from_file(struct emu8051_data *emu_data, FILE *file_in);
+int restore_state_from_file(struct emu8051_data *emu_data, FILE *file_in);
+void free_blocks(struct dynamic_array *dyn_array);
 void allocate_blocks(struct dynamic_array *dyn_array, uint32_t size);
 struct op_change *pop_front(struct dynamic_array *dyn_array);
 void write_front(struct dynamic_array *dyn_array, struct op_change op);

@@ -28,17 +28,24 @@ void write_header(FILE *save_file, uint8_t section)
 	fwrite(tmp, strlen(tmp), 1, save_file);
 }
 
+/*
+ * Check current header against all possible headers, return number of
+ * sections plus one if we don't have a valid header.
+ */
 static uint8_t read_header(FILE *file_in)
 {
-	uint8_t i;
 	char hdr[5];
+	uint8_t i;
 
-	fread(hdr, 4, 1, file_in);
+	if (!fread(hdr, 4, 1, file_in))
+		return NUM_OF_SECS + 1;
+
 	hdr[4] = '\0';
 
 	for (i = 0; i < NUM_OF_SECS; i++) {
-		if (!strcmp(file_sections[i], hdr))
+		if (!strcmp(file_sections[i], hdr)) {
 			return i;
+		}
 	}
 
 	return NUM_OF_SECS + 1;
@@ -116,53 +123,70 @@ void save_state_to_file(struct emu8051_data *emu_data, char *file_name)
 	fclose(save_file);
 }
 
-void restore_state_from_file(struct emu8051_data *emu_data, FILE *file_in)
+int restore_state_from_file(struct emu8051_data *emu_data, FILE *file_in)
 {
 	struct emu8051_dev *emu_dev = emu_data->emu_dev;
-	uint32_t i;
-	uint32_t new_size;
+	uint32_t i, new_size;
 	uint8_t ret;
 
 	//First thing to do, read 8 bytes, compare it to main header.
 	ret = read_header(file_in);
 	if (ret != FILE_HEADER)
-		return;
-	fread(&emu_dev->pc, sizeof(uint16_t), 1, file_in);
+		return -1;
+
+	if (!fread(&emu_dev->pc, sizeof(uint16_t), 1, file_in))
+		return - 1;
 
 	while (!feof(file_in)) {
 		ret = read_header(file_in);
 		switch (ret) {
 		case PMEM_SEC:
-			fread(emu_dev->pmem, sizeof(emu_dev->pmem), 1, file_in);
+			if (!fread(emu_dev->pmem, sizeof(emu_dev->pmem), 1, file_in))
+				return -1;
 			break;
 		case PMEM_B0_SEC:
-			fread(emu_dev->pmem_b0, sizeof(emu_dev->pmem_b0), 1, file_in);
+			if (!fread(emu_dev->pmem_b0, sizeof(emu_dev->pmem_b0), 1, file_in))
+				return -1;
 			break;
 		case PMEM_B1_SEC:
-			fread(emu_dev->pmem_b1, sizeof(emu_dev->pmem_b1), 1, file_in);
+			if (!fread(emu_dev->pmem_b1, sizeof(emu_dev->pmem_b1), 1, file_in))
+				return -1;
 			break;
 		case XRAM_SEC:
-			fread(emu_dev->xram, sizeof(emu_dev->xram), 1, file_in);
+			if (!fread(emu_dev->xram, sizeof(emu_dev->xram), 1, file_in))
+				return -1;
 			break;
 		case IRAM_SEC:
-			fread(emu_dev->iram, sizeof(emu_dev->iram), 1, file_in);
+			if (!fread(emu_dev->iram, sizeof(emu_dev->iram), 1, file_in))
+				return -1;
 			break;
 		case SFR_SEC:
-			fread(emu_dev->sfr, sizeof(emu_dev->sfr), 1, file_in);
+			if (!fread(emu_dev->sfr, sizeof(emu_dev->sfr), 1, file_in))
+				return -1;
 			break;
 		case BKOP_SEC:
-			fread(&emu_data->dyn_array.count, sizeof(uint32_t), 1, file_in);
-			fread(&new_size, sizeof(uint32_t), 1, file_in);
+			if (!fread(&emu_data->dyn_array.count, sizeof(uint32_t), 1, file_in))
+				return -1;
+			if (!fread(&new_size, sizeof(uint32_t), 1, file_in))
+				return -1;
 			resize_dynarray(&emu_data->dyn_array, (new_size - 1) * ARR_BLOCK_SIZE);
-			fread(&emu_data->dyn_array.start_offset, sizeof(uint32_t), 1, file_in);
+			if (!fread(&emu_data->dyn_array.start_offset, sizeof(uint32_t), 1, file_in))
+				return -1;
 
-			for (i = 0; i < emu_data->dyn_array.size; i++)
-				fread(emu_data->dyn_array.block[i], sizeof(struct arr_block), 1, file_in);
+			for (i = 0; i < emu_data->dyn_array.size; i++) {
+				if (!fread(emu_data->dyn_array.block[i],
+							sizeof(struct arr_block),
+							1, file_in))
+					return -1;
+			}
+
 			break;
 		default:
 			break;
 		}
 	}
+
+	return 0;
 }
 
 /*
@@ -297,6 +321,16 @@ void reverse_op(struct emu8051_dev *emu_dev, struct op_change *op_ch)
 			break;
 		}
 	}
+}
+
+void free_blocks(struct dynamic_array *dyn_array)
+{
+	uint32_t i;
+
+	for (i = 0; i < dyn_array->size; i++)
+		free(dyn_array->block[i]);
+
+	free(dyn_array->block);
 }
 
 void allocate_blocks(struct dynamic_array *dyn_array, uint32_t size)
@@ -753,6 +787,7 @@ void mov_log_write(struct emu8051_data *emu_data,
 			emu_dev->pc, addr, tmp);
 		break;
 	case A_ID:
+		src = addr = 0;
 		if (op->src_id == DIRECT_ID)
 			addr = get_pmem(emu_dev, emu_dev->pc + 1);
 		else
@@ -763,8 +798,7 @@ void mov_log_write(struct emu8051_data *emu_data,
 			emu_dev->pc, tmp);
 		break;
 	default:
-		log_write = 0;
-		break;
+		return;
 	}
 
 	if (log_write)
@@ -798,7 +832,7 @@ void movx_log_write(struct emu8051_data *emu_data,
 			dptr = get_reg(emu_dev, 1) & 0xff;
 			break;
 		default:
-			break;
+			return;
 		}
 
 		data = emu_dev->xram[dptr];
@@ -817,7 +851,7 @@ void movx_log_write(struct emu8051_data *emu_data,
 			dptr = get_reg(emu_dev, 1) & 0xff;
 			break;
 		default:
-			break;
+			return;
 		}
 
 		data = emu_dev->sfr[ACC];

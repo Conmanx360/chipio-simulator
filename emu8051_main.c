@@ -6,27 +6,34 @@
 #include <panel.h>
 #include "emu8051_defs.h"
 
-void parse_file(FILE *file_in, struct emu8051_dev *emu_dev, uint8_t file_id)
+static int parse_file(FILE *file_in, struct emu8051_dev *emu_dev, uint8_t file_id)
 {
 	switch (file_id) {
 	case FILE_ROM0:
-		fread(emu_dev->pmem, sizeof(emu_dev->pmem), 1, file_in);
+		if (!fread(emu_dev->pmem, sizeof(emu_dev->pmem), 1, file_in))
+			return -1;
 		break;
 	case FILE_ROM1:
-		fread(emu_dev->pmem_b0, sizeof(emu_dev->pmem_b0), 1, file_in);
+		if (!fread(emu_dev->pmem_b0, sizeof(emu_dev->pmem_b0), 1, file_in))
+			return -1;
 		break;
 	case FILE_ROM2:
-		fread(emu_dev->pmem_b1, sizeof(emu_dev->pmem_b1), 1, file_in);
+		if (!fread(emu_dev->pmem_b1, sizeof(emu_dev->pmem_b1), 1, file_in))
+			return -1;
 		break;
 	case FILE_XRAM:
-		fread(emu_dev->xram, sizeof(emu_dev->xram), 1, file_in);
+		if (!fread(emu_dev->xram, sizeof(emu_dev->xram), 1, file_in))
+			return -1;
 		break;
 	case FILE_IRAM:
-		fread(emu_dev->iram, sizeof(emu_dev->iram), 1, file_in);
+		if (!fread(emu_dev->iram, sizeof(emu_dev->iram), 1, file_in))
+			return -1;
 		break;
 	default:
-		return;
+		break;
 	}
+
+	return 0;
 }
 
 void emu_main(struct emu8051_data *emu_data)
@@ -45,48 +52,66 @@ int parse_commands(int argc, char **argv, struct emu8051_data *emu_data)
 {
 	struct emu8051_dev *emu_dev = emu_data->emu_dev;
 	char *file_name = NULL;
-	FILE *file_in;
-	int c;
+	FILE *file_in = NULL;
+	int c, ret;
 
+	ret = 0;
 	while ((c = getopt (argc, argv, "0:1:2:i:e:s:")) != -1) {
 		switch (c) {
 		case '0':
 			file_name = optarg;
 			file_in = fopen(file_name, "r");
-			parse_file(file_in, emu_dev, FILE_ROM0);
+			ret = parse_file(file_in, emu_dev, FILE_ROM0);
+			if (ret < 0)
+				goto exit;
 			break;
 		case '1':
 			file_name = optarg;
 			file_in = fopen(file_name, "r");
-			parse_file(file_in, emu_dev, FILE_ROM1);
+			ret = parse_file(file_in, emu_dev, FILE_ROM1);
+			if (ret < 0)
+				goto exit;
 			break;
 		case '2':
 			file_name = optarg;
 			file_in = fopen(file_name, "r");
-			parse_file(file_in, emu_dev, FILE_ROM2);
+			ret = parse_file(file_in, emu_dev, FILE_ROM2);
+			if (ret < 0)
+				goto exit;
 			break;
 		case 'e':
 			file_name = optarg;
 			file_in = fopen(file_name, "r");
-			parse_file(file_in, emu_dev, FILE_XRAM);
+			ret = parse_file(file_in, emu_dev, FILE_XRAM);
+			if (ret < 0)
+				goto exit;
 			break;
 		case 'i':
 			file_name = optarg;
 			file_in = fopen(file_name, "r");
-			parse_file(file_in, emu_dev, FILE_IRAM);
+			ret = parse_file(file_in, emu_dev, FILE_IRAM);
+			if (ret < 0)
+				goto exit;
 			break;
 		case 's':
 			file_name = optarg;
 			file_in = fopen(file_name, "r");
-			restore_state_from_file(emu_data, file_in);
+			ret = restore_state_from_file(emu_data, file_in);
+			if (ret < 0)
+				goto exit;
 			break;
 		}
 
-		if (file_in != NULL)
+		if (file_in != NULL) {
 			fclose(file_in);
+			file_in = NULL;
+		}
 	}
+exit:
+	if (file_in != NULL)
+		fclose(file_in);
 
-	return 0;
+	return ret;
 }
 
 int main(int argc, char **argv)
@@ -105,7 +130,10 @@ int main(int argc, char **argv)
 	emu_data->step_size = 100;
 
 	/* Parse command line arguments */
-	parse_commands(argc, argv, emu_data);
+	if (parse_commands(argc, argv, emu_data) < 0) {
+		printf("Parse failed!\n");
+		return 0;
+	}
 
 	direct_write(emu_data->emu_dev, 0xf9, 0x40);
 
@@ -117,6 +145,12 @@ int main(int argc, char **argv)
 
 	if (emu_data->log_data.logging_set)
 		logging_close_log(emu_data);
+
+	if (emu_data->dyn_array.count)
+		free_blocks(&emu_data->dyn_array);
+
+	free(emu_data->emu_dev);
+	free(emu_data);
 
 	return 0;
 }
