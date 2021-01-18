@@ -198,9 +198,11 @@ static void pc_win_input(struct emu8051_data *emu_data)
 static void verb_win_input(struct emu8051_data *emu_data)
 {
 	struct popup_win_data *popup_win = &emu_data->popup_data[VERB_IN_PANEL];
-        int end_loop, i;
+	struct emu8051_dev *dev = emu_data->emu_dev;
+	struct field_data *field_ptr;
+	struct op_change op_ch;
 	uint16_t in_vals[3];
-
+        int end_loop, i;
 
 	end_loop = field_input_handler(popup_win);
 
@@ -211,8 +213,33 @@ static void verb_win_input(struct emu8051_data *emu_data)
 			// Clear the field after reading from it.
 			set_field_buffer(popup_win->field[2 + (i * 3)], 0, "");
 		}
+
 		setup_verb_handler(emu_data, in_vals[0], in_vals[1], in_vals[2]);
+
+		/*
+		 * If the run to exit switch was set, step until we reach the
+		 * end of the verb input interrupt.
+		 */
+		field_ptr = field_userptr(popup_win->field[VERB_RUN_TO_EXIT_SWITCH]);
+		if (field_ptr->toggle_val) {
+			while (dev->pc != 0x3f59) {
+				dev->op_ch = &op_ch;
+				handle_opcode(emu_data);
+				write_front(&emu_data->dyn_array, op_ch);
+				emu_data->number++;
+				memset(&op_ch, 0, sizeof(op_ch));
+			}
+		}
+
+
 	}
+
+	/* Unset the toggle switch once we're done. */
+	field_ptr = field_userptr(popup_win->field[VERB_RUN_TO_EXIT_SWITCH]);
+	field_ptr->toggle_val = 0;
+	toggle_button_set(popup_win->field[VERB_RUN_TO_EXIT_SWITCH], field_ptr->toggle_val);
+	if (field_ptr->in_type == INPUT_TOGGLE)
+		toggle_button_highlight(popup_win->field[field_ptr->field_id + 1], 0);
 
         unpost_form(popup_win->form);
 	hide_popup(popup_win->panel);
