@@ -338,6 +338,12 @@ struct opcode_info {
 	void (*handler)(struct emu8051_dev *emu_dev);
 };
 
+struct func_call_log {
+	uint16_t func_addr;
+	uint16_t func_call_cnt;
+	uint8_t  pmem_bank;
+};
+
 struct logfile_data {
 	uint8_t logging_set;
 	FILE *log_file;
@@ -346,10 +352,13 @@ struct logfile_data {
 
 	uint8_t hic_addr_set[3];
 	uint8_t hic_data_set[4];
+	uint8_t hic_data_bus_set;
+	uint32_t hic_data;
 
 	uint16_t *func_addrs;
 	uint16_t *func_call_cnt;
 	uint8_t  *pmem_bank;
+	struct func_call_log *func_calls;
 	uint32_t number_of_funcs;
 };
 
@@ -528,13 +537,17 @@ enum logging_setup_field_ids {
 	LOG_ENABLE_IN,
 	LOG_ENABLE_VERB_SWITCH,
 	LOG_ENABLE_VERB_LABEL,
+	LOG_ENABLE_SAVE_SWITCH,
+	LOG_ENABLE_SAVE_LABEL,
 	LOG_ENABLE_OK_BUTTON,
+	LOG_ENABLE_FIELD_CNT,
 };
 
 enum button_ids {
 	BUTTON_TOGGLE_PC,
 	BUTTON_TOGGLE_DPTR,
 	BUTTON_TOGGLE_VERB_LOG,
+	BUTTON_TOGGLE_SAVE_LOG,
 };
 
 enum {

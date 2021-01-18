@@ -275,7 +275,7 @@ void setup_verb_handler(struct emu8051_data *emu_data, uint8_t nid,
 
 	direct_write(dev, 0xdc, val);
 
-	// The first value out is node.
+	/* The first value out is node. */
 	dev->verb_pos = 2;
 
 	dev->verb_sfr[2] = nid;

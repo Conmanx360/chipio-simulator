@@ -588,51 +588,56 @@ void lcall_log_write(struct emu8051_data *emu_data)
 {
 	struct logfile_data *log_data = &emu_data->log_data;
 	struct emu8051_dev *emu_dev = emu_data->emu_dev;
+	struct func_call_log *func;
 	char buf[1024];
-	uint8_t pmem_bank;
+	uint8_t bank;
 	uint16_t addr;
 	uint32_t i;
 
-	pmem_bank = direct_read(emu_dev, 0xfa);
+	bank = direct_read(emu_dev, 0xfa);
 	addr = get_pmem(emu_dev, emu_dev->pc + 2);
 	addr |= (get_pmem(emu_dev, emu_dev->pc + 1) << 8);
 
-	sprintf(buf, "\nLCALL: op %d, pc 0x%04x, func addr 0x%04x, bank 0x%02x, ret addr 0x%04x.\n", emu_data->number,
-			emu_dev->pc, addr, pmem_bank, emu_dev->pc + 3);
+	if ((addr > 0x8000) && (addr < 0xe000)) {
+		sprintf(buf, "\nLCALL: op %d, pc 0x%04x, func addr 0x%04x, bank 0x%02x, ret addr 0x%04x.\n", emu_data->number,
+				emu_dev->pc, addr, bank, emu_dev->pc + 3);
+	} else {
+		sprintf(buf, "\nLCALL: op %d, pc 0x%04x, func addr 0x%04x, ret addr 0x%04x.\n", emu_data->number,
+				emu_dev->pc, addr, emu_dev->pc + 3);
+		bank = 0;
+	}
 
 	fputs(buf, emu_data->log_data.log_file);
 
 	if (log_data->number_of_funcs) {
 		for (i = 0; i < log_data->number_of_funcs; i++) {
-			if (log_data->func_addrs[i] == addr
-					&& log_data->pmem_bank[i] == pmem_bank) {
-				log_data->func_call_cnt[i]++;
+			func = &log_data->func_calls[i];
+			if ((func->func_addr == addr) && (func->pmem_bank == bank)) {
+				func->func_call_cnt++;
 				return;
 			}
 		}
 
 		/* Never found this function, so add it as a new one. */
-		log_data->func_addrs = realloc(log_data->func_addrs,
-				sizeof(uint16_t) * log_data->number_of_funcs + 1);
-		log_data->func_call_cnt = realloc(log_data->func_call_cnt,
-				sizeof(uint16_t) * log_data->number_of_funcs + 1);
-		log_data->pmem_bank = realloc(log_data->pmem_bank,
-				sizeof(uint8_t) * log_data->number_of_funcs + 1);
-		log_data->func_addrs[log_data->number_of_funcs] = addr;
-		log_data->pmem_bank[log_data->number_of_funcs] = pmem_bank;
-		log_data->func_call_cnt[log_data->number_of_funcs] = 1;
+		log_data->func_calls = realloc(log_data->func_calls,
+				sizeof(*log_data->func_calls) * (log_data->number_of_funcs + 1));
+
+		func = &log_data->func_calls[log_data->number_of_funcs];
+
+		func->func_addr = addr;
+		func->pmem_bank = bank;
+		func->func_call_cnt = 1;
 		log_data->number_of_funcs++;
 	} else {
-		log_data->func_addrs = calloc(1, sizeof(uint16_t));
-		log_data->func_call_cnt = calloc(1, sizeof(uint16_t));
-		log_data->pmem_bank = calloc(1, sizeof(uint8_t));
-		log_data->func_addrs[0] = addr;
-		log_data->func_call_cnt[0]++;
-		log_data->pmem_bank[0] = pmem_bank;
+		log_data->func_calls = calloc(1, sizeof(*log_data->func_calls));
+		func = &log_data->func_calls[0];
+
+		func->func_addr = addr;
+		func->func_call_cnt++;
+		func->pmem_bank = bank;
 		log_data->number_of_funcs++;
 	}
 }
-
 
 uint8_t mov_get_src(struct emu8051_dev *emu_dev, const struct opcode_info *op,
 		char *buf)
@@ -738,7 +743,14 @@ void check_hic_register_set(struct emu8051_data *emu_data,
 	if (addr_set) {
 		hic_addr = get_current_hic_addr(emu_dev) & 0xffff;
 		hic_addr |= (data << 16);
-		sprintf(buf, "HIC Bus address set to 0x%06x.\n", hic_addr);
+		if (log_data->hic_data_bus_set) {
+			sprintf(buf, "HIC Write: Addr 0x%06x, data 0x%08x.\n", hic_addr,
+					log_data->hic_data);
+			log_data->hic_data_bus_set = 0;
+		} else {
+			sprintf(buf, "HIC Bus address set to 0x%06x.\n", hic_addr);
+		}
+
 		fputs(buf, emu_data->log_data.log_file);
 		memset(log_data->hic_addr_set, 0, 3);
 	}
@@ -749,6 +761,8 @@ void check_hic_register_set(struct emu8051_data *emu_data,
 		sprintf(buf, "HIC Bus data set to 0x%08x.\n", hic_data);
 		fputs(buf, emu_data->log_data.log_file);
 		memset(log_data->hic_data_set, 0, 4);
+		log_data->hic_data_bus_set = 1;
+		log_data->hic_data = hic_data;
 	}
 }
 
@@ -900,17 +914,33 @@ void ret_log_write(struct emu8051_data *emu_data)
 	fputs(buf, emu_data->log_data.log_file);
 }
 
+
+int sort_call_count(const void *a, const void *b)
+{
+        const struct func_call_log *c0, *c1;
+
+        c0 = a;
+        c1 = b;
+
+        return (c1->func_call_cnt - c0->func_call_cnt);
+}
+
 void logging_print_func_calls(struct emu8051_data *emu_data)
 {
 	struct logfile_data *log_data = &emu_data->log_data;
+	struct func_call_log *func;
 	char buf[1024];
 	uint32_t i;
 
+	qsort(log_data->func_calls, log_data->number_of_funcs,
+                                sizeof(*func), sort_call_count);
+
 	memset(buf, 0, 1024);
 	for (i = 0; i < log_data->number_of_funcs; i++) {
-		sprintf(buf, "Func[%d]: addr 0x%04x, bank 0x%02x, call count %d.\n",
-				i, log_data->func_addrs[i], log_data->pmem_bank[i],
-				log_data->func_call_cnt[i]);
+		func = &log_data->func_calls[i];
+		sprintf(buf, "Func[%04d]: addr 0x%04x, bank 0x%02x, call count %d.\n",
+				i, func->func_addr, func->pmem_bank,
+				func->func_call_cnt);
 		fputs(buf, log_data->log_file);
 	}
 }
@@ -932,6 +962,8 @@ void logging_close_log(struct emu8051_data *emu_data)
 			free(log_data->func_call_cnt);
 		if (log_data->pmem_bank)
 			free(log_data->pmem_bank);
+		if (log_data->func_calls)
+			free(log_data->func_calls);
 	}
 
 	memset(log_data, 0, sizeof(*log_data));

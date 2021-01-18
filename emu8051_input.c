@@ -278,6 +278,14 @@ static void logging_setup_win_input(struct emu8051_data *emu_data)
 		emu_data->log_data.exit_on_verb = field_ptr->toggle_val;
 		if (emu_data->log_data.exit_on_verb)
 			fputs("Exit on verb handling enabled.\n", emu_data->log_data.log_file);
+
+		/* Check if we need to create a save file as well. */
+		field_ptr = field_userptr(popup_win->field[LOG_ENABLE_SAVE_SWITCH]);
+		if (field_ptr->toggle_val) {
+			emu_data->number = 0;
+			save_state_to_file(emu_data,
+					field_buffer(popup_win->field[LOG_ENABLE_IN], 0));
+		}
 	}
 
 	unpost_form(popup_win->form);
