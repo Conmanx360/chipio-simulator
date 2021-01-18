@@ -39,9 +39,6 @@ uint8_t get_pmem(struct emu8051_dev *emu_dev, uint16_t addr)
 	uint8_t data;
 
 	switch (addr) {
-	case 0x0000 ... 0x7fff:
-		data = emu_dev->pmem[addr];
-		break;
 	case 0x8000 ... 0xdfff:
 		// Need to check for bankswitching on this and next two.
 		switch (get_pmem_bank(emu_dev, addr)) {
@@ -54,13 +51,16 @@ uint8_t get_pmem(struct emu8051_dev *emu_dev, uint16_t addr)
 		case 2:
 			data = emu_dev->pmem_b1[addr - 0x8000];
 			break;
-		case 3:
+		default:
 			data = 0;
 			break;
 		}
 		break;
 	case 0xe000 ... 0xffff:
 		data = emu_dev->xram[addr];
+		break;
+	default:
+		data = emu_dev->pmem[addr];
 		break;
 	}
 
