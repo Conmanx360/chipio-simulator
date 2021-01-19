@@ -145,10 +145,17 @@ static int field_input_handler(struct popup_win_data *popup_win)
 			field_switch(popup_win, field_ptr, REQ_UP_FIELD);
 			break;
 		case KEY_LEFT:
-			field_switch(popup_win, field_ptr, REQ_LEFT_FIELD);
+			if (field_ptr->in_type == INPUT_ALPHANUM)
+				form_driver(popup_win->form, REQ_PREV_CHAR);
+			else
+				field_switch(popup_win, field_ptr, REQ_LEFT_FIELD);
+
 			break;
 		case KEY_RIGHT:
-			field_switch(popup_win, field_ptr, REQ_RIGHT_FIELD);
+			if (field_ptr->in_type == INPUT_ALPHANUM)
+				form_driver(popup_win->form, REQ_NEXT_CHAR);
+			else
+				field_switch(popup_win, field_ptr, REQ_RIGHT_FIELD);
 			break;
 		case '\n':
 			if (field_ptr->field_id == OK_BUTTON)
@@ -159,6 +166,12 @@ static int field_input_handler(struct popup_win_data *popup_win)
 			} else
 				form_driver(popup_win->form, REQ_NEXT_FIELD);
 
+			break;
+		case KEY_BACKSPACE:
+			if (field_ptr->in_type != INPUT_ALPHANUM)
+				break;
+
+			form_driver(popup_win->form, REQ_DEL_PREV);
 			break;
 		default:
 			if (check_input(field_ptr->in_type, ch))
