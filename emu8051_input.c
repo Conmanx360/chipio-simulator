@@ -195,6 +195,24 @@ static void pc_win_input(struct emu8051_data *emu_data)
 	hide_popup(popup_win->panel);
 }
 
+static void clear_toggle_buttons(struct popup_win_data *popup, uint32_t field_cnt)
+{
+	struct field_data *field_ptr;
+	uint32_t i;
+
+	for (i = 0; i < field_cnt; i++) {
+		field_ptr = field_userptr(popup->field[i]);
+		if (!field_ptr)
+			continue;
+
+		if (field_ptr->in_type == INPUT_TOGGLE) {
+			field_ptr->toggle_val = 0;
+			toggle_button_set(popup->field[field_ptr->field_id], field_ptr->toggle_val);
+			toggle_button_highlight(popup->field[field_ptr->field_id + 1], 0);
+		}
+	}
+}
+
 static void verb_win_input(struct emu8051_data *emu_data)
 {
 	struct popup_win_data *popup_win = &emu_data->popup_data[VERB_IN_PANEL];
@@ -234,12 +252,7 @@ static void verb_win_input(struct emu8051_data *emu_data)
 
 	}
 
-	/* Unset the toggle switch once we're done. */
-	field_ptr = field_userptr(popup_win->field[VERB_RUN_TO_EXIT_SWITCH]);
-	field_ptr->toggle_val = 0;
-	toggle_button_set(popup_win->field[VERB_RUN_TO_EXIT_SWITCH], field_ptr->toggle_val);
-	if (field_ptr->in_type == INPUT_TOGGLE)
-		toggle_button_highlight(popup_win->field[field_ptr->field_id + 1], 0);
+	clear_toggle_buttons(popup_win, VERB_OK_BUTTON + 1);
 
         unpost_form(popup_win->form);
 	hide_popup(popup_win->panel);
@@ -314,6 +327,8 @@ static void logging_setup_win_input(struct emu8051_data *emu_data)
 					field_buffer(popup_win->field[LOG_ENABLE_IN], 0));
 		}
 	}
+
+	clear_toggle_buttons(popup_win, LOG_ENABLE_OK_BUTTON + 1);
 
 	unpost_form(popup_win->form);
 	hide_popup(popup_win->panel);
