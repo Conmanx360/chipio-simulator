@@ -9,8 +9,8 @@ OBJ    := emu8051_dev.o emu8051_display.o emu8051_input.o \
 %.o: %.c $(DEPS)
 	$(CC) -c -o $@ $< $(CCFLAGS) $(LDFLAGS)
 
-emu8051: $(OBJ)
+chipio-simulator: $(OBJ)
 	$(CC) -o $@ $^ $(CFLAGS) $(LDFLAGS)
 
 clean:
-	rm -f emu8051 $(OBJ)
+	rm -f chipio-simulator $(OBJ)
