@@ -496,8 +496,8 @@ void jbc_handler(struct emu8051_dev *emu_dev)
 	int8_t rel_addr = get_pmem(emu_dev, emu_dev->pc + 2);
 
 	if (get_bit(emu_dev, get_pmem(emu_dev, emu_dev->pc + 1))) {
-		emu_dev->pc += rel_addr;
 		set_bit(emu_dev, get_pmem(emu_dev, emu_dev->pc + 1), 0);
+		emu_dev->pc += rel_addr;
 	}
 
 	emu_dev->pc += 3;
